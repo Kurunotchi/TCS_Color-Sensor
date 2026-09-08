@@ -1,29 +1,30 @@
 /*
-  TCS34725 Color Sensor + Color Indicator LEDs
-  ---------------------------------------------
-  Green  -> D2
-  Black  -> D3
-  Yellow -> D4
-  Red    -> D5
+  TCS34725 Color Sensor - Match Against Known Samples
+  -------------------------------------------------------
+  Compares each new reading to reference readings you
+  recorded (Green, Black, Yellow, Red) and prints/lights
+  up an LED for whichever one it's closest to.
+
+  Library: Adafruit_TCS34725 (Library Manager)
+  Wiring: SDA -> A4, SCL -> A5, VCC -> 3.3V/5V, GND -> GND
+
+  LED assumed COMMON-CATHODE (HIGH = on).
+  If yours is common-anode, swap HIGH/LOW in setLED().
 */
 
 #include <Wire.h>
 #include "Adafruit_TCS34725.h"
 
-Adafruit_TCS34725 tcs =
-  Adafruit_TCS34725(
-    TCS34725_INTEGRATIONTIME_50MS,
-    TCS34725_GAIN_4X
-  );
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
-// ------------------------------------------------
-// COLOR REFERENCE DATA
-// ------------------------------------------------
-
+// ---- Reference samples (from your actual readings) ----
+// Format: {R, G, B, C}
 struct ColorSample {
   const char* name;
   uint16_t r, g, b, c;
 };
+
+//Dito natin ilalagay ang RAW data given by our sensor
 
 ColorSample references[] = {
   {"Green",  321, 534, 447, 1326},
@@ -32,120 +33,70 @@ ColorSample references[] = {
   {"Red",    526, 495, 481, 1252}
 };
 
-// IMPORTANT: There are 4 colors
-const int numReferences = 4;
+// Automatically matches the actual array size — no more manual mismatch bugs
+const int numReferences = sizeof(references) / sizeof(references[0]);
 
+// If the closest match is farther than this distance, report "Unknown"
+// instead of forcing a match. Raise/lower this to loosen/tighten matching.
 const float MAX_MATCH_DISTANCE = 200.0;
 
-// ------------------------------------------------
-// LED PINS
-// ------------------------------------------------
-
-const int GREEN_LED  = 2;
-const int BLACK_LED  = 3;
-const int YELLOW_LED = 4;
-const int RED_LED    = 5;
-
-// ------------------------------------------------
-// SETUP
-// ------------------------------------------------
+int red = 3;
+int blue = 4;
+int green = 5;
 
 void setup() {
-
   Serial.begin(9600);
 
-  pinMode(GREEN_LED, OUTPUT);
-  pinMode(BLACK_LED, OUTPUT);
-  pinMode(YELLOW_LED, OUTPUT);
-  pinMode(RED_LED, OUTPUT);
-
-  // Turn all LEDs OFF
-  turnOffLEDs();
+  pinMode(red, OUTPUT);
+  pinMode(blue, OUTPUT);
+  pinMode(green, OUTPUT);
 
   if (tcs.begin()) {
     Serial.println("TCS34725 sensor found!");
-  } 
-  else {
+  } else {
     Serial.println("No TCS34725 found ... check your wiring");
-
     while (1);
   }
 }
 
-// ------------------------------------------------
-// MAIN LOOP
-// ------------------------------------------------
-
 void loop() {
-
   uint16_t r, g, b, c;
-
-  // Read sensor
   tcs.getRawData(&r, &g, &b, &c);
 
-  // Match color
   String colorName = matchColor(r, g, b, c);
 
-  // Print RAW values
-  Serial.print("Raw -> R:");
-  Serial.print(r);
+  Serial.print("Raw -> R:"); Serial.print(r);
+  Serial.print(" G:"); Serial.print(g);
+  Serial.print(" B:"); Serial.print(b);
+  Serial.print(" C:"); Serial.print(c);
 
-  Serial.print(" G:");
-  Serial.print(g);
-
-  Serial.print(" B:");
-  Serial.print(b);
-
-  Serial.print(" C:");
-  Serial.print(c);
-
-  Serial.print(" | Color: ");
+  Serial.print("  |  Color: ");
   Serial.println(colorName);
 
-  // Turn ON corresponding LED
-  showColorLED(colorName);
+  setLED(colorName);
 
   delay(500);
 }
 
-// ------------------------------------------------
-// COLOR MATCHING FUNCTION
-// ------------------------------------------------
-
-String matchColor(
-  uint16_t r,
-  uint16_t g,
-  uint16_t b,
-  uint16_t c
-) {
-
+String matchColor(uint16_t r, uint16_t g, uint16_t b, uint16_t c) {
   float bestDistance = -1;
   const char* bestMatch = "Unknown";
 
   for (int i = 0; i < numReferences; i++) {
-
     float dr = (float)r - references[i].r;
     float dg = (float)g - references[i].g;
     float db = (float)b - references[i].b;
     float dc = (float)c - references[i].c;
 
-    // Euclidean distance
-    float distance =
-      sqrt(
-        dr * dr +
-        dg * dg +
-        db * db +
-        dc * dc
-      );
+    // Euclidean distance across all 4 channels
+    float distance = sqrt(dr * dr + dg * dg + db * db + dc * dc);
 
     if (bestDistance < 0 || distance < bestDistance) {
-
       bestDistance = distance;
       bestMatch = references[i].name;
     }
   }
 
-  // Too far from all reference colors
   if (bestDistance > MAX_MATCH_DISTANCE) {
     return "Unknown";
   }
@@ -153,50 +104,22 @@ String matchColor(
   return String(bestMatch);
 }
 
-// ------------------------------------------------
-// LED CONTROL
-// ------------------------------------------------
+void setLED(String colorName) {
+  // Start with everything off
+  digitalWrite(red, LOW);
+  digitalWrite(green, LOW);
+  digitalWrite(blue, LOW);
 
-void showColorLED(String color) {
-
-  // First turn everything OFF
-  turnOffLEDs();
-
-  if (color == "Green") {
-
-    digitalWrite(GREEN_LED, HIGH);
-
+  if (colorName == "Red") {
+    digitalWrite(red, HIGH);
+  } else if (colorName == "Green") {
+    digitalWrite(green, HIGH);
+  } else if (colorName == "Yellow") {
+    digitalWrite(red, HIGH);
+    digitalWrite(green, HIGH);
+  } else if (colorName == "Black") {
+    // all off — already handled above
+  } else {
+    // Unknown — LED stays off
   }
-
-  else if (color == "Black") {
-
-    digitalWrite(BLACK_LED, HIGH);
-
-  }
-
-  else if (color == "Yellow") {
-
-    digitalWrite(YELLOW_LED, HIGH);
-
-  }
-
-  else if (color == "Red") {
-
-    digitalWrite(RED_LED, HIGH);
-
-  }
-
-  // Unknown = all LEDs remain OFF
-}
-
-// ------------------------------------------------
-// TURN OFF ALL LEDs
-// ------------------------------------------------
-
-void turnOffLEDs() {
-
-  digitalWrite(GREEN_LED, LOW);
-  digitalWrite(BLACK_LED, LOW);
-  digitalWrite(YELLOW_LED, LOW);
-  digitalWrite(RED_LED, LOW);
 }
